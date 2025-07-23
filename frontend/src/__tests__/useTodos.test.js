@@ -1,9 +1,9 @@
 // src/__tests__/useTodos.test.js
 
-import { renderHook, act } from '@testing-library/react';
+import { renderHook, waitFor } from '@testing-library/react';
+import { act } from 'react'; // Import from 'react' to fix deprecation warning
 import { useTodos } from '../hooks/useTodos';
 import { todoService } from '../services/api';
-import { waitFor } from '@testing-library/react';
 
 // Mock todoService
 jest.mock('../services/api', () => ({
@@ -21,6 +21,7 @@ describe('useTodos', () => {
     const { result } = renderHook(() => useTodos());
 
     expect(result.current.loading).toBe(true);
+
     await waitFor(() => {
       expect(result.current.todos).toHaveLength(1);
       expect(result.current.loading).toBe(false);
@@ -62,8 +63,16 @@ describe('useTodos', () => {
     todoService.createTodo.mockRejectedValue(mockError);
     const { result } = renderHook(() => useTodos());
 
+    await waitFor(() => {
+      expect(result.current.todos).toHaveLength(0);
+    });
+
     await act(async () => {
-      await result.current.addTodo({ text: 'New' });
+      try {
+        await result.current.addTodo({ text: 'New' });
+      } catch (err) {
+        // Expected error, do nothing
+      }
     });
 
     await waitFor(() => {
@@ -100,7 +109,11 @@ describe('useTodos', () => {
     });
 
     await act(async () => {
-      await result.current.toggleTodo('1');
+      try {
+        await result.current.toggleTodo('1');
+      } catch (err) {
+        // Expected error, do nothing
+      }
     });
 
     await waitFor(() => {
@@ -108,5 +121,5 @@ describe('useTodos', () => {
     });
   });
 
-  // Add similar tests for editTodo, updateNotes, deleteTodo
+  // Add similar tests for editTodo, updateNotes, deleteTodo if needed
 });

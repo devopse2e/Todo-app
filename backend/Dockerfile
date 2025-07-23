@@ -1,38 +1,51 @@
-# Multi-stage build for Node.js backend
-FROM node:18-alpine AS builder
+
+# Stage 1: Builder (installs deps and prepares app; no mandatory build if not needed)
+FROM node:18-alpine AS build
 
 WORKDIR /app
 
-# Copy package files and install ALL dependencies (including devDeps for build tools like Babel)
+# Copy package files and install ALL dependencies (including devDeps)
 COPY package*.json ./
-RUN npm ci  
+RUN npm ci
 
-# Copy source code and build (transpile with Babel)
+# Copy source code (no build step needed; just copy for test/prod)
 COPY . .
-#RUN npm run build 
 
-#  (lean runtime image)
-FROM node:18-alpine
+# Stage 2: Test (for running npm test in a container)
+FROM node:18-alpine AS test
+
+WORKDIR /app
+
+# Copy from builder (includes deps and source)
+COPY --from=build /app /app
+
+# Command to run tests (can be overridden)
+CMD ["npm", "test", "--", "--ci"]
+
+# Stage 3: Production (lean runtime image)
+FROM node:18-alpine AS production
+
 # Create non-root user for security
 RUN addgroup -g 1001 -S nodejs && adduser -S nodejs -u 1001
 
 WORKDIR /app
-# Copy package files and install ONLY production dependencies (strips devDeps for lean image)
-COPY package*.json ./
-RUN npm ci --only=production && npm cache clean --force  # Kept --only=production here for runtime optimization
 
-# Copy built application (dist/ folder only) from builder, with ownership change
-# Note: We don't copy builder's node_modules to avoid including devDeps
-COPY --from=builder --chown=nodejs:nodejs /app .
+# Copy package files and install ONLY production dependencies
+COPY package*.json ./
+RUN npm ci --only=production && npm cache clean --force
+
+# Copy application from builder, with ownership change
+COPY --from=build --chown=nodejs:nodejs /app .
+
 # Switch to non-root user
 USER nodejs
 
 # Expose port
 EXPOSE 3001
 
-# Health check (pings /health endpoint)
+# Health check (pings /health endpoint; adjust if your app has a different health route)
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
   CMD node -e "require('http').get('http://localhost:3001/health', (res) => { process.exit(res.statusCode === 200 ? 0 : 1) })"
 
-# Run the transpiled server
+# Run the server
 CMD ["node", "server.js"]

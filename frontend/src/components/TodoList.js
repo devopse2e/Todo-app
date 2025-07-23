@@ -21,7 +21,7 @@ function TodoList() {
 
   const activeTodos = sortedTodos.filter(todo => !todo.completed);
   const completedTodos = sortedTodos.filter(todo => todo.completed);
-
+  console.log('Rendering TodoList - Active:', activeTodos.length, 'Completed:', completedTodos.length);
   if (loading && todos.length === 0) return <LoadingSpinner />;
 
   return (

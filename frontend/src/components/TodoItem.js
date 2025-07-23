@@ -1,5 +1,3 @@
-// frontend/src/components/TodoItem.js
-
 import React, { useState, useRef, useEffect } from 'react';
 import '../styles/TodoItem.css';
 
@@ -27,7 +25,6 @@ function TodoItem({ todo, toggleTodo, editTodo, updateNotes, deleteTodo }) {
   const [notesError, setNotesError] = useState('');
   const [isPopupOpen, setIsPopupOpen] = useState(false);
 
-  // New: for timer and double click lockout
   const clickTimer = useRef(null);
 
   const nameInputRef = useRef(null);
@@ -79,24 +76,19 @@ function TodoItem({ todo, toggleTodo, editTodo, updateNotes, deleteTodo }) {
     }
   };
 
-  // Only handle single click: open popup if not confirmed as part of a double click
   const handleTitleClick = (e) => {
-    // Clear any previous timer
     if (clickTimer.current) clearTimeout(clickTimer.current);
-    // Wait 250ms to see if a double click is coming
     clickTimer.current = setTimeout(() => {
       setIsPopupOpen(true);
       clickTimer.current = null;
     }, 250);
   };
 
-  // If a double click happens, cancel the popup open
   const handleTitleDoubleClick = (e) => {
     if (clickTimer.current) {
       clearTimeout(clickTimer.current);
       clickTimer.current = null;
     }
-    // Do nothing else (no edit, no popup)
   };
 
   const closePopup = () => setIsPopupOpen(false);
@@ -109,17 +101,25 @@ function TodoItem({ todo, toggleTodo, editTodo, updateNotes, deleteTodo }) {
 
   const isDueSoon = todo.dueDate && new Date(todo.dueDate) < new Date() && !todo.completed;
 
+  const handleToggle = () => {
+    console.log('Toggle button clicked for todo ID:', todo._id); // Debug log to confirm click
+    toggleTodo(todo._id);
+  };
+
   return (
     <>
       <div className={`todo-item-card ${todo.completed ? 'completed' : ''} ${isDueSoon ? 'overdue' : ''}`}>
-        <div className="todo-toggle-wrap">
+        <div className="todo-toggle-wrap" onClick={handleToggle}> {/* Fallback onClick for the entire wrapper */}
           <input
+            id={`todo-toggle-${todo._id}`} // Unique ID for label association
             type="checkbox"
             className="todo-toggle"
             checked={todo.completed}
-            onChange={() => toggleTodo(todo._id)}
+            onChange={handleToggle} // Direct handler
           />
-          <span className="todo-toggle-custom" />
+          <label htmlFor={`todo-toggle-${todo._id}`} className="todo-toggle-label"> {/* Label wraps custom span for clickability */}
+            <span className="todo-toggle-custom" />
+          </label>
         </div>
         <div className="todo-main-col">
           <div className="todo-title-row">
@@ -188,7 +188,6 @@ function TodoItem({ todo, toggleTodo, editTodo, updateNotes, deleteTodo }) {
         </div>
       </div>
 
-      {/* Popup Modal */}
       {isPopupOpen && (
         <div className="todo-popup-overlay" onClick={closePopup}>
           <div className="todo-popup-card" onClick={(e) => e.stopPropagation()}>

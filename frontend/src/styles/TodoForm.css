@@ -7,15 +7,23 @@
   font-weight: 600;
   font-size: 1.1rem;
   padding: 12px 28px;
-  transition: background 0.25s;
+  transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out, background-color 0.2s ease-in-out;
   width: 170px;
   margin: 20px auto;
   display: block;
   box-shadow: 0 2px 8px rgba(99,92,255,0.09);
 }
 .add-todo-btn:hover {
-  background: #5249fb;
+  transform: scale(1.1) rotate(3deg); /* Slight scale and rotate for pop effect */
+  box-shadow: 0 4px 12px rgba(99, 92, 255, 0.3); /* Subtle shadow lift */
+  background-color: #7f54ff; /* Optional: Darken background on hover (adjust color) */
+  cursor: pointer;
 }
+
+.add-todo-btn:active {
+  transform: scale(0.95); /* Quick press effect */
+}
+
 
 .modal-overlay {
   position: fixed;
