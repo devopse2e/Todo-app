@@ -1,0 +1,72 @@
+.todo-list-main {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 0 24px 32px;
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  color: #22274d;
+}
+
+.todo-section {
+  margin-bottom: 32px;
+}
+
+.todo-section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: #f3f3ff;
+  border-radius: 12px;
+  padding: 14px 22px;
+  font-weight: 700;
+  font-size: 1.15rem;
+  color: #635cff;
+  box-shadow: 0 3px 10px rgba(99, 92, 255, 0.12);
+  cursor: pointer;
+  user-select: none;
+  transition: background-color 0.25s, color 0.25s;
+}
+.todo-section-header:hover {
+  background-color: #dcdcff;
+  color: #483cd7;
+}
+
+.chevron {
+  font-size: 1.2rem;
+  color: #635cff;
+  user-select: none;
+  transition: transform 0.3s ease;
+}
+.chevron.up {
+  transform: rotate(180deg);
+}
+.chevron.down {
+  transform: rotate(0deg);
+}
+
+.todo-section-body {
+  margin-top: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.empty-state {
+  padding: 36px 0;
+  font-size: 1rem;
+  color: #8a8bb1;
+  font-style: italic;
+  text-align: center;
+}
+
+/* Scrollbar styling for long lists */
+.todo-section-body::-webkit-scrollbar {
+  width: 8px;
+}
+.todo-section-body::-webkit-scrollbar-thumb {
+  background: #babaff;
+  border-radius: 12px;
+  transition: background-color 0.3s;
+}
+.todo-section-body::-webkit-scrollbar-thumb:hover {
+  background: #6e6ef6;
+}

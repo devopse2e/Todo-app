@@ -1,0 +1,29 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend-deployment
+  namespace: todo-app
+spec:
+  replicas: 2  # Scale to 2 pods
+  selector:
+    matchLabels:
+      app: backend
+  template:
+    metadata:
+      labels:
+        app: backend
+    spec:
+      containers:
+        - name: backend
+          image: devopse2e/todo-app-backend:latest  # e.g., yourusername/todo-app-backend:latest
+          ports:
+            - containerPort: 3001
+          envFrom:
+            - configMapRef:
+                name: todo-app-config  # Use ConfigMap vars
+          readinessProbe:
+            httpGet:
+              path: /health  # From thread: Use /health for checks
+              port: 3001
+            initialDelaySeconds: 5
+            periodSeconds: 10
