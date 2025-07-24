@@ -25,11 +25,13 @@ variables:
   FULL_CONTEXT: "$CI_PROJECT_PATH:$K8S_CONTEXT" 
 
 stages:
+  - .pre
   - build
   - test
   - docker-build
   - docker-test
   - docker-push
+  - deploy
 
 
 
@@ -41,6 +43,17 @@ stages:
       - node_modules/
     policy: pull-push
 
+generate-env:
+  stage: .pre  # Early stage
+  tags:
+    - macos
+    - shell
+  script:
+    - echo -e "$ENV_FILE" > .env
+  artifacts:
+    paths:
+      - .env
+    expire_in: 1 week
 
 before_script:
   #- apk add --no-cache bash curl git
@@ -59,6 +72,7 @@ build-frontend:
     - shell
   script: 
     - cd frontend
+    - export $(cat .env | xargs)
     - npm ci --cache ${NPM_CONFIG_CACHE}
     - npm run build
     - echo "Frontend build completed successfully"
@@ -72,13 +86,15 @@ build-frontend:
     paths:
       - frontend/node_modules/
     policy: pull-push
+  needs:
+    - generate-env 
+  dependencies:
+    - generate-env
   
 build-backend:
   stage: build
   image: node:${NODE_VERSION}-alpine
   resource_group: build
-  needs:
-    - build-frontend
   tags:
     - macos
     - shell
@@ -86,6 +102,7 @@ build-backend:
     - rm -rf frontend/ backend/node_modules || true  
   script: 
     - cd backend
+    - export $(cat .env | xargs)
     - npm ci --cache ${NPM_CONFIG_CACHE}
     - echo "Backend dependencies installed successfully"
     # Add any backend build steps if needed
@@ -101,7 +118,13 @@ build-backend:
     paths:
       - backend/node_modules/
     policy: pull
+  needs:
+    - generate-env 
+    - build-frontend
+  dependencies:
+    - generate-env
   retry: 2
+
 
 test-frontend:
   stage: test
@@ -109,10 +132,9 @@ test-frontend:
   tags:
     - macos
     - shell
-  dependencies:
-    - build-frontend
   script:
     - cd frontend
+    - export $(cat .env | xargs)
     - npm ci --cache ${NPM_CONFIG_CACHE}
     - npm run test:ci
   artifacts:
@@ -130,21 +152,23 @@ test-frontend:
       - frontend/node_modules/
     policy: pull
   coverage: '/Lines\s*:\s*(\d+\.?\d*)%/'
-  allow_failure: true
+  needs:
+    - generate-env 
+    - build-frontend
+  dependencies:
+    - build-frontend
+    - generate-env
   retry: 2
 
 test-backend:
   stage: test
   image: node:${NODE_VERSION}-alpine
-  needs:
-    - build-backend
   tags:
     - macos
     - shell
-  dependencies:
-    - build-backend
   script:
     - cd backend
+    - export $(cat .env | xargs)
     - npm ci --cache ${NPM_CONFIG_CACHE}
     - npm run test:ci 
     - sleep 20
@@ -165,6 +189,12 @@ test-backend:
       - backend/node_modules/
     policy: pull
   coverage: '/Lines\s*:\s*(\d+\.?\d*)%/'
+  needs:
+    - build-backend
+    - generate-env 
+  dependencies:
+    - build-backend
+    - generate-env 
   retry: 2
 
 docker-build-frontend:
@@ -175,13 +205,16 @@ docker-build-frontend:
   before_script:
     - echo "$DOCKERHUB_PASS" | docker login -u "$DOCKERHUB_USER" --password-stdin
   script:
-    - docker build -t $FRONTEND_IMAGE:$TAG --target production frontend/ || { echo "Frontend build failed"; exit 1; }   # Build with SHA tag; added error handling
-    - docker build -t $FRONTEND_TESTIMAGE:$TAG --target test frontend/ || { echo "Frontend build failed"; exit 1; }
+    - export $(cat .env | xargs) 
+    - docker build -t $FRONTEND_IMAGE:$TAG --target production --build-arg REACT_APP_API_URL=$REACT_APP_API_URL frontend/ || { echo "Frontend build failed"; exit 1; }  # Build with SHA tag; added error handling
+    - docker build -t $FRONTEND_TESTIMAGE:$TAG --target test --build-arg REACT_APP_API_URL=$REACT_APP_API_URL frontend/ || { echo "Frontend build failed"; exit 1; }
     - if [ "$CI_COMMIT_BRANCH" == "main" ] || [[ "$CI_COMMIT_BRANCH" =~ ^feature(-.*)?$ ]]; then docker tag $FRONTEND_IMAGE:$TAG $FRONTEND_IMAGE:latest; fi 
   needs:
     - build-frontend
+    - generate-env 
   dependencies:
     - build-frontend
+    - generate-env 
   retry: 2
   rules:
     - if: '$CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH =~ /^feature(-.*)?$/'
@@ -194,13 +227,16 @@ docker-build-backend:
   before_script:
     - echo "$DOCKERHUB_PASS" | docker login -u "$DOCKERHUB_USER" --password-stdin
   script:
+    - export $(cat .env | xargs) 
     - docker build -t $BACKEND_IMAGE:$TAG --target production backend/ || { echo "Backend build failed"; exit 1; }  
     - docker build -t $BACKEND_TESTIMAGE:$TAG --target test backend/ || { echo "Backend build failed"; exit 1; }
     - if [ "$CI_COMMIT_BRANCH" == "main" ] || [[ "$CI_COMMIT_BRANCH" =~ ^feature(-.*)?$ ]]; then docker tag $BACKEND_IMAGE:$TAG $BACKEND_IMAGE:latest; fi 
   needs:
     - build-backend
+    - generate-env 
   dependencies:
     - build-backend
+    - generate-env 
   retry: 2
   rules:
     - if: '$CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH =~ /^feature(-.*)?$/'
@@ -214,10 +250,11 @@ docker-test-backend:
     - echo "$DOCKERHUB_PASS" | docker login -u "$DOCKERHUB_USER" --password-stdin
   script:
     - echo "------Starting Docker Backend Tests ------"
-    - docker run --rm $BACKEND_TESTIMAGE:$TAG
+    - export $(cat .env | xargs)
+    - docker run --rm --env-file=.env $BACKEND_TESTIMAGE:$TAG
     - docker network create todo-network
     - docker run -d --name todo-mongo --network todo-network -p 27017:27017 mongo:latest
-    - docker run -d --name todo-backend --network todo-network -p 3001:3001 -e MONGO_URI=mongodb://todo-mongo:27017/todoapp $BACKEND_IMAGE:$TAG 
+    - docker run -d --name todo-backend --network todo-network -p 3001:3001  --env-file=.env $BACKEND_IMAGE:$TAG 
     - sleep 10
     - curl -f http://localhost:3001/health || exit 1
     - docker image rm $BACKEND_TESTIMAGE:$TAG
@@ -225,8 +262,10 @@ docker-test-backend:
   needs:
     - docker-build-backend
     - test-backend
+    - generate-env 
   dependencies:
     - docker-build-backend
+    - generate-env 
   rules:
     - if: '$CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH =~ /^feature(-.*)?$/'
 
@@ -239,12 +278,13 @@ docker-test-frontend:
     - echo "$DOCKERHUB_PASS" | docker login -u "$DOCKERHUB_USER" --password-stdin
   script:
     - echo "------Starting Docker Frontend Tests ------"
+    - export $(cat .env | xargs)
     - docker run --rm $FRONTEND_TESTIMAGE:$TAG 
-    - docker run -d --name todo-frontend --network todo-network -p 8080:80 $FRONTEND_IMAGE:$TAG
-    - sleep 5
+    - docker run -d --name todo-frontend --network todo-network --env-file=.env -p 8080:80 $FRONTEND_IMAGE:$TAG
+    - sleep 10
     - curl -f http://localhost:8080 || exit 1 
     - docker stop todo-backend && docker rm -f todo-backend
-    - docker stop todo-frontend && docker rm -f todo-frontend
+    - docker stop todo-frontend  && docker rm -f todo-frontend
     - docker rm -f todo-mongo
     - docker network rm todo-network
     - docker image rm $FRONTEND_TESTIMAGE:$TAG
@@ -253,10 +293,13 @@ docker-test-frontend:
     - docker-build-frontend
     - test-frontend
     - docker-test-backend
+    - generate-env 
   dependencies:
     - docker-build-frontend
+    - generate-env 
   rules:
     - if: '$CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH =~ /^feature(-.*)?$/'
+  retry: 2
 
 
 
@@ -276,7 +319,8 @@ docker-push-frontend:
     - docker-test-frontend
   rules:
     - if: '$CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH =~ /^feature(-.*)?$/'
-  
+  retry: 2
+
 docker-push-backend:
   stage: docker-push
   tags:
@@ -293,3 +337,40 @@ docker-push-backend:
     - docker-test-backend
   rules:
     - if: '$CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH =~ /^feature(-.*)?$/'
+  retry: 2
+
+deploy-k8s:
+  stage: deploy
+  image: bitnami/kubectl:latest   # Use a Helm image for installation
+  tags:
+    - macos
+    - shell
+  before_script:
+    - apk update && apk add --no-cache bash curl  # Install kubectl and dependencies
+  script:
+    - echo "Setting up kubeconfig"
+    - mkdir -p ~/.kube
+    - echo "$KUBECONFIG_CONTENT"
+    - echo "$KUBECONFIG_CONTENT" | base64 -d > ~/.kube/config || { echo "Decoding failed"; exit 1; }  # Add error handling
+    - kubectl config view  # Debug: Output the full config for logs
+    - kubectl config get-contexts  # Debug: List available contexts
+    - kubectl config use-context $FULL_CONTEXT || { echo "Context not found"; exit 1; }  # Hardcode for testing; replace with $K8S_CONTEXT later
+    - echo "Installing/Upgrading NGINX Ingress Controller with webhook disabled"
+    - helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
+    - helm repo update
+    - helm upgrade --install ingress-nginx ingress-nginx/ingress-nginx --namespace ingress-nginx --create-namespace --set controller.admissionWebhooks.enabled=false || { echo "Helm upgrade failed"; exit 1; }  # Disable webhook
+    - echo "Deploying app manifests"
+    - kubectl create namespace $K8S_NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
+    - kubectl apply -f $K8S_MANIFEST_DIR 
+    - kubectl rollout status deployment/frontend-deployment --namespace $K8S_NAMESPACE --timeout=4m
+    - kubectl rollout status deployment/backend-deployment --namespace $K8S_NAMESPACE --timeout=4m
+  needs:
+    - docker-push-frontend
+    - docker-push-backend
+  only:
+    - main
+  environment:
+    name: development
+    url: http://todo-app.local
+  #rules:
+   # - when: never
