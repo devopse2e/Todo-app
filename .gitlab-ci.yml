@@ -1,7 +1,7 @@
 workflow:
   name: TodoApp Deployment
   rules:
-    - if: '$CI_COMMIT_BRANCH =~ /^feature\/.*/'
+    - if: '$CI_COMMIT_BRANCH =~ /^feature(-.*)?$/'
       when: always
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
       when: always
@@ -15,7 +15,9 @@ variables:
   NPM_CONFIG_CACHE: "/tmp/npm-cache"
   # Docker-specific global variables (non-sensitive)
   FRONTEND_IMAGE: $DOCKERHUB_USER/todo-app-frontend
+  FRONTEND_TESTIMAGE: $DOCKERHUB_USER/todo-frontend-test
   BACKEND_IMAGE: $DOCKERHUB_USER/todo-app-backend
+  BACKEND_TESTIMAGE: $DOCKERHUB_USER/todo-backend-test
   TAG: $CI_COMMIT_SHORT_SHA  # Tags with commit SHA for traceability;test alternative: $CI_PIPELINE_ID
   K8S_CONTEXT: kubernetes-the-hard-way
   K8S_NAMESPACE: todo-app
@@ -99,6 +101,7 @@ build-backend:
     paths:
       - backend/node_modules/
     policy: pull
+  retry: 2
 
 test-frontend:
   stage: test
@@ -128,6 +131,7 @@ test-frontend:
     policy: pull
   coverage: '/Lines\s*:\s*(\d+\.?\d*)%/'
   allow_failure: true
+  retry: 2
 
 test-backend:
   stage: test
@@ -171,13 +175,16 @@ docker-build-frontend:
   before_script:
     - echo "$DOCKERHUB_PASS" | docker login -u "$DOCKERHUB_USER" --password-stdin
   script:
-    - docker build -t $FRONTEND_IMAGE:$TAG frontend/ || { echo "Frontend build failed"; exit 1; }   # Build with SHA tag; added error handling
-    - if [ "$CI_COMMIT_BRANCH" == "main" || "$CI_COMMIT_BRANCH" =~ '/^feature\/.*/' ]; then docker tag $FRONTEND_IMAGE:$TAG $FRONTEND_IMAGE:latest; fi 
+    - docker build -t $FRONTEND_IMAGE:$TAG --target production frontend/ || { echo "Frontend build failed"; exit 1; }   # Build with SHA tag; added error handling
+    - docker build -t $FRONTEND_TESTIMAGE:$TAG --target test frontend/ || { echo "Frontend build failed"; exit 1; }
+    - if [ "$CI_COMMIT_BRANCH" == "main" ] || [[ "$CI_COMMIT_BRANCH" =~ ^feature(-.*)?$ ]]; then docker tag $FRONTEND_IMAGE:$TAG $FRONTEND_IMAGE:latest; fi 
   needs:
     - build-frontend
   dependencies:
     - build-frontend
   retry: 2
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH =~ /^feature(-.*)?$/'
 
 docker-build-backend:
   stage: docker-build
@@ -187,10 +194,102 @@ docker-build-backend:
   before_script:
     - echo "$DOCKERHUB_PASS" | docker login -u "$DOCKERHUB_USER" --password-stdin
   script:
-    - docker build -t $BACKEND_IMAGE:$TAG backend/ || { echo "Backend build failed"; exit 1; }  # Build with SHA tag; added error handling
-    - if [ "$CI_COMMIT_BRANCH" == "main" || "$CI_COMMIT_BRANCH" =~ '/^feature\/.*/' ]; then docker tag $BACKEND_IMAGE:$TAG $BACKEND_IMAGE:latest; fi 
+    - docker build -t $BACKEND_IMAGE:$TAG --target production backend/ || { echo "Backend build failed"; exit 1; }  
+    - docker build -t $BACKEND_TESTIMAGE:$TAG --target test backend/ || { echo "Backend build failed"; exit 1; }
+    - if [ "$CI_COMMIT_BRANCH" == "main" ] || [[ "$CI_COMMIT_BRANCH" =~ ^feature(-.*)?$ ]]; then docker tag $BACKEND_IMAGE:$TAG $BACKEND_IMAGE:latest; fi 
   needs:
     - build-backend
   dependencies:
     - build-backend
   retry: 2
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH =~ /^feature(-.*)?$/'
+
+docker-test-backend:
+  stage: docker-test
+  tags:
+    - macos
+    - shell
+  before_script:
+    - echo "$DOCKERHUB_PASS" | docker login -u "$DOCKERHUB_USER" --password-stdin
+  script:
+    - echo "------Starting Docker Backend Tests ------"
+    - docker run --rm $BACKEND_TESTIMAGE:$TAG
+    - docker network create todo-network
+    - docker run -d --name todo-mongo --network todo-network -p 27017:27017 mongo:latest
+    - docker run -d --name todo-backend --network todo-network -p 3001:3001 -e MONGO_URI=mongodb://todo-mongo:27017/todoapp $BACKEND_IMAGE:$TAG 
+    - sleep 10
+    - curl -f http://localhost:3001/health || exit 1
+    - docker image rm $BACKEND_TESTIMAGE:$TAG
+    - echo "------Docker Backend Tests Completed------"
+  needs:
+    - docker-build-backend
+    - test-backend
+  dependencies:
+    - docker-build-backend
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH =~ /^feature(-.*)?$/'
+
+docker-test-frontend:
+  stage: docker-test
+  tags:
+    - macos
+    - shell
+  before_script:
+    - echo "$DOCKERHUB_PASS" | docker login -u "$DOCKERHUB_USER" --password-stdin
+  script:
+    - echo "------Starting Docker Frontend Tests ------"
+    - docker run --rm $FRONTEND_TESTIMAGE:$TAG 
+    - docker run -d --name todo-frontend --network todo-network -p 8080:80 $FRONTEND_IMAGE:$TAG
+    - sleep 5
+    - curl -f http://localhost:8080 || exit 1 
+    - docker stop todo-backend && docker rm -f todo-backend
+    - docker stop todo-frontend && docker rm -f todo-frontend
+    - docker rm -f todo-mongo
+    - docker network rm todo-network
+    - docker image rm $FRONTEND_TESTIMAGE:$TAG
+    - echo "------Docker Frontend Tests Completed------"
+  needs:
+    - docker-build-frontend
+    - test-frontend
+    - docker-test-backend
+  dependencies:
+    - docker-build-frontend
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH =~ /^feature(-.*)?$/'
+
+
+
+docker-push-frontend:
+  stage: docker-push
+  tags:
+    - macos
+    - shell
+  before_script:
+    - echo "$DOCKERHUB_PASS" | docker login -u "$DOCKERHUB_USER" --password-stdin
+  script:
+    - docker push $FRONTEND_IMAGE:$TAG || exit 1
+    - if [ "$CI_COMMIT_BRANCH" == "main" ] || [[ "$CI_COMMIT_BRANCH" =~ ^feature(-.*)?$ ]]; then docker push $FRONTEND_IMAGE:latest; fi  
+  needs:
+    - docker-test-frontend  
+  dependencies:
+    - docker-test-frontend
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH =~ /^feature(-.*)?$/'
+  
+docker-push-backend:
+  stage: docker-push
+  tags:
+    - macos
+    - shell
+  before_script:
+    - echo "$DOCKERHUB_PASS" | docker login -u "$DOCKERHUB_USER" --password-stdin
+  script:
+    - docker push $BACKEND_IMAGE:$TAG || exit 1
+    - if [ "$CI_COMMIT_BRANCH" == "main" ] || [[ "$CI_COMMIT_BRANCH" =~ ^feature(-.*)?$ ]]; then docker push $BACKEND_IMAGE:latest; fi
+  needs:
+    - docker-test-backend
+  dependencies:
+    - docker-test-backend
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH =~ /^feature(-.*)?$/'

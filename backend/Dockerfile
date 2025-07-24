@@ -6,7 +6,9 @@ WORKDIR /app
 
 # Copy package files and install ALL dependencies (including devDeps)
 COPY package*.json ./
-RUN npm ci
+RUN npm cache clean --force && \
+    npm ci && \
+    npm cache verify
 
 # Copy source code (no build step needed; just copy for test/prod)
 COPY . .
@@ -32,7 +34,9 @@ WORKDIR /app
 
 # Copy package files and install ONLY production dependencies
 COPY package*.json ./
-RUN npm ci --only=production && npm cache clean --force
+RUN npm cache clean --force && \
+    npm ci --only=production && \
+    npm cache verify
 
 # Copy application from builder, with ownership change
 COPY --from=build --chown=nodejs:nodejs /app .
