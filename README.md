@@ -104,5 +104,3 @@ Whether you’re quickly jotting down thoughts, or carefully planning your day, 
 
 ***
 
-If you’d like, I can now **turn this into a fully formatted README.md** with sections like `Installation`, `Screenshots`, and a `Contributing` guide so it’s production-ready for GitHub.  
-Do you want me to prepare that next?
