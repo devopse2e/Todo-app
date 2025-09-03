@@ -2,7 +2,7 @@ Todo-APP
 
 
 Install and Run app
-
+``` bash
 In terminal
 
 cd frontend
@@ -18,6 +18,6 @@ cd backend
 npm install
 
 npm run dev
-
+```
 
 http://localhost:3000
